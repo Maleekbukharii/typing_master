@@ -14,7 +14,6 @@ const TypingInput: React.FC<TypingInputProps> = ({
   disabled = false,
   inputRef
 }) => {
-  // Focus the input element on mount
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
