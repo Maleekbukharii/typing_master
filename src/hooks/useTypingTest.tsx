@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateParagraph } from '../utils/textGenerator';
+import { generateParagraph, ContentType } from '../utils/textGenerator';
 import { 
   calculateWPM, 
   calculateAccuracy, 
@@ -10,10 +10,13 @@ import {
   playKeySound
 } from '../utils/typingUtils';
 
-type DifficultyLevel = 'easy' | 'medium' | 'hard';
+export type DifficultyLevel = 'easy' | 'medium' | 'hard';
+export type TimeLimit = 15 | 30 | 60 | 120 | 0; // 0 means no time limit
 
 interface UseTypingTestProps {
   initialDifficulty?: DifficultyLevel;
+  initialTimeLimit?: TimeLimit;
+  initialContentType?: ContentType;
   soundEnabled?: boolean;
 }
 
@@ -27,15 +30,20 @@ interface TypingTestState {
   accuracy: number;
   progress: number;
   difficulty: DifficultyLevel;
+  timeLimit: TimeLimit;
+  contentType: ContentType;
   soundEnabled: boolean;
   cursorPosition: number;
   characterTimings: CharacterTiming[];
   previousTypingProgress: TypingProgress[] | null;
   paragraphId: string; // To identify the same paragraph for ghost cursor
+  timeRemaining: number; // Time remaining in seconds for timed tests
 }
 
 export const useTypingTest = ({
   initialDifficulty = 'medium',
+  initialTimeLimit = 0,
+  initialContentType = 'mixed',
   soundEnabled = true
 }: UseTypingTestProps = {}) => {
   const [state, setState] = useState<TypingTestState>({
@@ -48,19 +56,26 @@ export const useTypingTest = ({
     accuracy: 0,
     progress: 0,
     difficulty: initialDifficulty,
+    timeLimit: initialTimeLimit,
+    contentType: initialContentType,
     soundEnabled,
     cursorPosition: 0,
     characterTimings: [],
     previousTypingProgress: null,
-    paragraphId: ''
+    paragraphId: '',
+    timeRemaining: initialTimeLimit
   });
   
   const intervalRef = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   
   // Generate a new paragraph
-  const generateNewText = useCallback((difficulty: DifficultyLevel = state.difficulty) => {
-    const text = generateParagraph(difficulty);
+  const generateNewText = useCallback((
+    difficulty: DifficultyLevel = state.difficulty,
+    contentType: ContentType = state.contentType
+  ) => {
+    const text = generateParagraph(difficulty, contentType);
     const paragraphId = btoa(text.substring(0, 20)); // Create a simple ID from the start of text
     
     // Check if we have previous progress for this exact paragraph
@@ -77,29 +92,34 @@ export const useTypingTest = ({
       accuracy: 0,
       progress: 0,
       difficulty,
+      contentType,
       cursorPosition: 0,
       characterTimings: [],
       previousTypingProgress: previousProgress ? JSON.parse(previousProgress) : null,
-      paragraphId
+      paragraphId,
+      timeRemaining: prev.timeLimit
     }));
     
     // Focus the input field
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [state.difficulty]);
+  }, [state.difficulty, state.contentType]);
   
   // Initialize with a paragraph
   useEffect(() => {
-    generateNewText(initialDifficulty);
+    generateNewText(initialDifficulty, initialContentType);
     
     // Cleanup interval on unmount
     return () => {
       if (intervalRef.current) {
         window.clearInterval(intervalRef.current);
       }
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+      }
     };
-  }, [initialDifficulty, generateNewText]);
+  }, [initialDifficulty, initialContentType, generateNewText]);
   
   // Update stats while typing
   useEffect(() => {
@@ -134,6 +154,41 @@ export const useTypingTest = ({
       }
     };
   }, [state.startTime, state.isComplete, state.input, state.text, state.cursorPosition]);
+  
+  // Timer for time-limited tests
+  useEffect(() => {
+    if (state.timeLimit > 0 && state.startTime && !state.isComplete) {
+      // Initialize timer
+      timerRef.current = window.setInterval(() => {
+        setState(prev => {
+          const elapsedSeconds = Math.floor((Date.now() - (prev.startTime || Date.now())) / 1000);
+          const remaining = Math.max(0, prev.timeLimit - elapsedSeconds);
+          
+          // End test if time is up
+          if (remaining === 0 && !prev.isComplete) {
+            if (timerRef.current) window.clearInterval(timerRef.current);
+            return {
+              ...prev,
+              isComplete: true,
+              endTime: Date.now(),
+              timeRemaining: 0
+            };
+          }
+          
+          return {
+            ...prev,
+            timeRemaining: remaining
+          };
+        });
+      }, 1000);
+    }
+    
+    return () => {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+      }
+    };
+  }, [state.timeLimit, state.startTime, state.isComplete]);
   
   // Handle input changes
   const handleInputChange = useCallback((inputValue: string) => {
@@ -190,8 +245,33 @@ export const useTypingTest = ({
   
   // Change difficulty level
   const changeDifficulty = useCallback((newDifficulty: DifficultyLevel) => {
-    generateNewText(newDifficulty);
-  }, [generateNewText]);
+    setState(prev => ({
+      ...prev,
+      difficulty: newDifficulty
+    }));
+    generateNewText(newDifficulty, state.contentType);
+  }, [generateNewText, state.contentType]);
+  
+  // Change time limit
+  const changeTimeLimit = useCallback((newTimeLimit: TimeLimit) => {
+    setState(prev => ({
+      ...prev,
+      timeLimit: newTimeLimit,
+      timeRemaining: newTimeLimit
+    }));
+    
+    // Reset the test with new time limit
+    generateNewText(state.difficulty, state.contentType);
+  }, [generateNewText, state.difficulty, state.contentType]);
+  
+  // Change content type
+  const changeContentType = useCallback((newContentType: ContentType) => {
+    setState(prev => ({
+      ...prev,
+      contentType: newContentType
+    }));
+    generateNewText(state.difficulty, newContentType);
+  }, [generateNewText, state.difficulty]);
   
   // Toggle sound
   const toggleSound = useCallback(() => {
@@ -223,7 +303,8 @@ export const useTypingTest = ({
         progress: 0,
         cursorPosition: 0,
         characterTimings: [],
-        previousTypingProgress: typingProgress
+        previousTypingProgress: typingProgress,
+        timeRemaining: prev.timeLimit
       }));
     } else {
       // Just reset the current text
@@ -237,7 +318,8 @@ export const useTypingTest = ({
         accuracy: 0,
         progress: 0,
         cursorPosition: 0,
-        characterTimings: []
+        characterTimings: [],
+        timeRemaining: prev.timeLimit
       }));
     }
     
@@ -247,6 +329,14 @@ export const useTypingTest = ({
     }
   }, [state.characterTimings, state.startTime, state.paragraphId]);
   
+  // Clear all interval timers when component unmounts
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
+    };
+  }, []);
+  
   return {
     text: state.text,
     input: state.input,
@@ -255,6 +345,9 @@ export const useTypingTest = ({
     accuracy: state.accuracy,
     progress: state.progress,
     difficulty: state.difficulty,
+    timeLimit: state.timeLimit,
+    timeRemaining: state.timeRemaining,
+    contentType: state.contentType,
     soundEnabled: state.soundEnabled,
     cursorPosition: state.cursorPosition,
     previousTypingProgress: state.previousTypingProgress,
@@ -262,6 +355,8 @@ export const useTypingTest = ({
     handleInputChange,
     generateNewText,
     changeDifficulty,
+    changeTimeLimit,
+    changeContentType,
     toggleSound,
     retryText,
     inputRef

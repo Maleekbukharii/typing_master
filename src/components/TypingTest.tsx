@@ -3,8 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { useTypingTest } from '../hooks/useTypingTest';
 import TypingInput from './TypingInput';
 import StatDisplay from './StatDisplay';
+import TestSettings from './TestSettings';
 import GhostCursor from './GhostCursor';
-import { X, Check, RefreshCw, Volume2, VolumeX, Keyboard } from 'lucide-react';
+import { Check } from 'lucide-react';
 
 const TypingTest: React.FC = () => {
   const {
@@ -15,6 +16,9 @@ const TypingTest: React.FC = () => {
     accuracy,
     progress,
     difficulty,
+    timeLimit,
+    timeRemaining,
+    contentType,
     soundEnabled,
     cursorPosition,
     previousTypingProgress,
@@ -22,6 +26,8 @@ const TypingTest: React.FC = () => {
     handleInputChange,
     generateNewText,
     changeDifficulty,
+    changeTimeLimit,
+    changeContentType,
     toggleSound,
     retryText,
     inputRef
@@ -89,60 +95,6 @@ const TypingTest: React.FC = () => {
     );
   };
   
-  // Controls for difficulty and sound
-  const renderControls = () => {
-    return (
-      <div className="w-full max-w-2xl mx-auto mb-8 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button 
-            className={`px-4 py-2 rounded-md transition-all ${difficulty === 'easy' ? 'bg-typing-accent text-black font-medium' : 'bg-white/5 hover:bg-white/10'}`}
-            onClick={() => changeDifficulty('easy')}
-          >
-            Easy
-          </button>
-          <button 
-            className={`px-4 py-2 rounded-md transition-all ${difficulty === 'medium' ? 'bg-typing-accent text-black font-medium' : 'bg-white/5 hover:bg-white/10'}`}
-            onClick={() => changeDifficulty('medium')}
-          >
-            Medium
-          </button>
-          <button 
-            className={`px-4 py-2 rounded-md transition-all ${difficulty === 'hard' ? 'bg-typing-accent text-black font-medium' : 'bg-white/5 hover:bg-white/10'}`}
-            onClick={() => changeDifficulty('hard')}
-          >
-            Hard
-          </button>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <button 
-            className="p-2 rounded-md bg-white/5 hover:bg-white/10 transition-all"
-            onClick={toggleSound}
-            aria-label={soundEnabled ? "Disable sound" : "Enable sound"}
-          >
-            {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
-          </button>
-          
-          <button 
-            className="p-2 rounded-md bg-white/5 hover:bg-white/10 transition-all"
-            onClick={retryText}
-            aria-label="Retry text"
-          >
-            <RefreshCw size={20} />
-          </button>
-          
-          <button 
-            className="p-2 rounded-md bg-white/5 hover:bg-white/10 transition-all"
-            onClick={() => generateNewText()}
-            aria-label="New text"
-          >
-            <Keyboard size={20} />
-          </button>
-        </div>
-      </div>
-    );
-  };
-  
   // Completion message
   const renderCompletionMessage = () => {
     if (!isComplete) return null;
@@ -168,12 +120,30 @@ const TypingTest: React.FC = () => {
         <p className="text-typing-muted">Practice typing with real-time stats and ghost replay</p>
       </header>
       
-      <StatDisplay wpm={wpm} accuracy={accuracy} progress={progress} />
+      <StatDisplay 
+        wpm={wpm} 
+        accuracy={accuracy} 
+        progress={progress} 
+        timeRemaining={timeRemaining} 
+        timeLimit={timeLimit} 
+      />
       
       {renderProgressBar()}
       {renderCompletionMessage()}
       {renderText()}
-      {renderControls()}
+      
+      <TestSettings 
+        difficulty={difficulty}
+        timeLimit={timeLimit}
+        contentType={contentType}
+        soundEnabled={soundEnabled}
+        changeDifficulty={changeDifficulty}
+        changeTimeLimit={changeTimeLimit}
+        changeContentType={changeContentType}
+        toggleSound={toggleSound}
+        retryText={retryText}
+        generateNewText={generateNewText}
+      />
       
       {/* Attribution */}
       <div className="text-center text-typing-muted text-sm mt-16">
