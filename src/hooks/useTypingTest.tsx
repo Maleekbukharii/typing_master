@@ -1,17 +1,17 @@
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateParagraph, ContentType } from '../utils/textGenerator';
+import { useState, useRef, useCallback } from 'react';
+import { useTypingTimer } from './useTypingTimer';
+import { useTypingStats } from './useTypingStats';
 import { 
-  calculateWPM, 
-  calculateAccuracy, 
-  CharacterTiming, 
-  TypingProgress, 
-  processTypingProgress,
-  playKeySound
-} from '../utils/typingUtils';
-
-export type DifficultyLevel = 'easy' | 'medium' | 'hard';
-export type TimeLimit = 15 | 30 | 60 | 120 | 0; // 0 means no time limit
+  DifficultyLevel, 
+  TimeLimit, 
+  TypingTestState, 
+  TypingTestHookReturn,
+  CharacterTiming
+} from '../types/typingTypes';
+import { ContentType } from '../utils/textGenerator';
+import { playKeySound, processTypingProgress } from '../utils/typingUtils';
+import { generateTypingText, saveTypingProgress } from '../services/typingTextService';
 
 interface UseTypingTestProps {
   initialDifficulty?: DifficultyLevel;
@@ -20,32 +20,12 @@ interface UseTypingTestProps {
   soundEnabled?: boolean;
 }
 
-interface TypingTestState {
-  text: string;
-  input: string;
-  isComplete: boolean;
-  startTime: number | null;
-  endTime: number | null;
-  wpm: number;
-  accuracy: number;
-  progress: number;
-  difficulty: DifficultyLevel;
-  timeLimit: TimeLimit;
-  contentType: ContentType;
-  soundEnabled: boolean;
-  cursorPosition: number;
-  characterTimings: CharacterTiming[];
-  previousTypingProgress: TypingProgress[] | null;
-  paragraphId: string; // To identify the same paragraph for ghost cursor
-  timeRemaining: number; // Time remaining in seconds for timed tests
-}
-
 export const useTypingTest = ({
   initialDifficulty = 'medium',
   initialTimeLimit = 0,
   initialContentType = 'mixed',
   soundEnabled = true
-}: UseTypingTestProps = {}) => {
+}: UseTypingTestProps = {}): TypingTestHookReturn => {
   const [state, setState] = useState<TypingTestState>({
     text: '',
     input: '',
@@ -66,8 +46,6 @@ export const useTypingTest = ({
     timeRemaining: initialTimeLimit
   });
   
-  const intervalRef = useRef<number | null>(null);
-  const timerRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   
   // Generate a new paragraph
@@ -75,11 +53,7 @@ export const useTypingTest = ({
     difficulty: DifficultyLevel = state.difficulty,
     contentType: ContentType = state.contentType
   ) => {
-    const text = generateParagraph(difficulty, contentType);
-    const paragraphId = btoa(text.substring(0, 20)); // Create a simple ID from the start of text
-    
-    // Check if we have previous progress for this exact paragraph
-    const previousProgress = localStorage.getItem(`typing-progress-${paragraphId}`);
+    const { text, paragraphId, previousProgress } = generateTypingText(difficulty, contentType);
     
     setState(prev => ({
       ...prev,
@@ -95,7 +69,7 @@ export const useTypingTest = ({
       contentType,
       cursorPosition: 0,
       characterTimings: [],
-      previousTypingProgress: previousProgress ? JSON.parse(previousProgress) : null,
+      previousTypingProgress: previousProgress,
       paragraphId,
       timeRemaining: prev.timeLimit
     }));
@@ -106,89 +80,57 @@ export const useTypingTest = ({
     }
   }, [state.difficulty, state.contentType]);
   
+  // Handle timer completion
+  const handleTimerComplete = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      isComplete: true,
+      endTime: Date.now(),
+      timeRemaining: 0
+    }));
+  }, []);
+  
+  // Handle timer tick
+  const handleTimerTick = useCallback((remainingTime: number) => {
+    setState(prev => ({
+      ...prev,
+      timeRemaining: remainingTime
+    }));
+  }, []);
+  
+  // Initialize typing timer
+  useTypingTimer({
+    timeLimit: state.timeLimit,
+    startTime: state.startTime,
+    isComplete: state.isComplete,
+    onTimerComplete: handleTimerComplete,
+    onTimerTick: handleTimerTick
+  });
+  
+  // Handle stats update
+  const handleStatsUpdate = useCallback((wpm: number, accuracy: number, progress: number) => {
+    setState(prev => ({
+      ...prev,
+      wpm,
+      accuracy,
+      progress
+    }));
+  }, []);
+  
+  // Initialize typing stats
+  useTypingStats({
+    text: state.text,
+    input: state.input,
+    cursorPosition: state.cursorPosition,
+    startTime: state.startTime,
+    isComplete: state.isComplete,
+    onStatsUpdate: handleStatsUpdate
+  });
+  
   // Initialize with a paragraph
-  useEffect(() => {
+  useState(() => {
     generateNewText(initialDifficulty, initialContentType);
-    
-    // Cleanup interval on unmount
-    return () => {
-      if (intervalRef.current) {
-        window.clearInterval(intervalRef.current);
-      }
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-      }
-    };
-  }, [initialDifficulty, initialContentType, generateNewText]);
-  
-  // Update stats while typing
-  useEffect(() => {
-    if (state.startTime && !state.isComplete) {
-      intervalRef.current = window.setInterval(() => {
-        const currentTime = Date.now();
-        const timeElapsed = (currentTime - state.startTime) / 1000;
-        
-        // Calculate current stats
-        const correctChars = state.input.split('').filter((char, i) => 
-          char === state.text[i]
-        ).length;
-        
-        const currentWpm = calculateWPM(state.cursorPosition, timeElapsed);
-        const currentAccuracy = calculateAccuracy(correctChars, state.input.length);
-        const currentProgress = (state.cursorPosition / state.text.length) * 100;
-        
-        setState(prev => ({
-          ...prev,
-          wpm: currentWpm,
-          accuracy: currentAccuracy,
-          progress: currentProgress
-        }));
-      }, 500);
-    } else if (intervalRef.current) {
-      window.clearInterval(intervalRef.current);
-    }
-    
-    return () => {
-      if (intervalRef.current) {
-        window.clearInterval(intervalRef.current);
-      }
-    };
-  }, [state.startTime, state.isComplete, state.input, state.text, state.cursorPosition]);
-  
-  // Timer for time-limited tests
-  useEffect(() => {
-    if (state.timeLimit > 0 && state.startTime && !state.isComplete) {
-      // Initialize timer
-      timerRef.current = window.setInterval(() => {
-        setState(prev => {
-          const elapsedSeconds = Math.floor((Date.now() - (prev.startTime || Date.now())) / 1000);
-          const remaining = Math.max(0, prev.timeLimit - elapsedSeconds);
-          
-          // End test if time is up
-          if (remaining === 0 && !prev.isComplete) {
-            if (timerRef.current) window.clearInterval(timerRef.current);
-            return {
-              ...prev,
-              isComplete: true,
-              endTime: Date.now(),
-              timeRemaining: 0
-            };
-          }
-          
-          return {
-            ...prev,
-            timeRemaining: remaining
-          };
-        });
-      }, 1000);
-    }
-    
-    return () => {
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-      }
-    };
-  }, [state.timeLimit, state.startTime, state.isComplete]);
+  });
   
   // Handle input changes
   const handleInputChange = useCallback((inputValue: string) => {
@@ -236,10 +178,7 @@ export const useTypingTest = ({
     // Save progress if complete
     if (isComplete) {
       const typingProgress = processTypingProgress(newCharacterTimings);
-      localStorage.setItem(
-        `typing-progress-${state.paragraphId}`,
-        JSON.stringify(typingProgress)
-      );
+      saveTypingProgress(state.paragraphId, typingProgress);
     }
   }, [state.input, state.startTime, state.text, state.characterTimings, state.soundEnabled, state.paragraphId]);
   
@@ -286,10 +225,7 @@ export const useTypingTest = ({
     // Save current progress before resetting
     if (state.characterTimings.length > 0 && state.startTime) {
       const typingProgress = processTypingProgress(state.characterTimings);
-      localStorage.setItem(
-        `typing-progress-${state.paragraphId}`,
-        JSON.stringify(typingProgress)
-      );
+      saveTypingProgress(state.paragraphId, typingProgress);
       
       // Reset with the same text but with previous progress
       setState(prev => ({
@@ -328,14 +264,6 @@ export const useTypingTest = ({
       inputRef.current.focus();
     }
   }, [state.characterTimings, state.startTime, state.paragraphId]);
-  
-  // Clear all interval timers when component unmounts
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-      if (timerRef.current) window.clearInterval(timerRef.current);
-    };
-  }, []);
   
   return {
     text: state.text,

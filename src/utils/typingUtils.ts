@@ -1,4 +1,6 @@
 
+import { CharacterTiming, TypingProgress } from '../types/typingTypes';
+
 /**
  * Calculate words per minute
  * @param textLength - Number of characters typed
@@ -23,21 +25,6 @@ export const calculateWPM = (textLength: number, timeInSeconds: number): number 
 export const calculateAccuracy = (correctChars: number, totalChars: number): number => {
   if (totalChars === 0) return 100;
   return Math.round((correctChars / totalChars) * 100);
-};
-
-/**
- * Generate timestamps for ghost replay
- * @param typedChars - Array of typed characters with timestamps
- */
-export type CharacterTiming = {
-  char: string;
-  timestamp: number;
-  position: number;
-};
-
-export type TypingProgress = {
-  timestamp: number;
-  position: number;
 };
 
 /**
